@@ -69,11 +69,65 @@ The frontend will run on `http://localhost:3000`
 - Comprehensive error handling
 - Responsive design
 - CORS-enabled API
+- **AI Medical Report Generation** with Ollama integration
+- **Multi-format Export** (HTML, PDF, DOCX)
+- **Report Editing** capabilities for doctors
+- **Comprehensive Patient Information** forms
+
+## AI Report Generation
+
+The system now includes AI-powered medical report generation using Ollama:
+
+### Setup Ollama
+
+1. **Install Ollama** from [ollama.ai](https://ollama.ai)
+2. **Start Ollama service**:
+   ```bash
+   ollama serve
+   ```
+3. **Pull a model** (recommended: llama3.2):
+   ```bash
+   ollama pull llama3.2
+   ```
+4. **Set environment variable**:
+   ```bash
+   # Windows
+   set NEXT_PUBLIC_OLLAMA_URL=http://localhost:11434
+   
+   # Linux/macOS
+   export NEXT_PUBLIC_OLLAMA_URL=http://localhost:11434
+   ```
+
+### Using AI Reports
+
+1. **Fill patient information** including patient name
+2. **Upload and process** medical images
+3. **Generate AI Report** - Click "Generate AI Medical Report"
+4. **Edit Report** - Review and modify the AI-generated content
+5. **Export Report** - Download in HTML, PDF, or DOCX format
+
+### Report Features
+
+- **Structured Medical Reports** with patient demographics
+- **Clinical History Integration** from patient forms
+- **AI Analysis Results** with affected area percentages
+- **Professional Formatting** for medical documentation
+- **Multi-format Export** for different use cases
+- **Doctor Editing** capabilities for final review
+
+### Export Formats
+
+- **HTML Export**: Direct download of formatted HTML report
+- **PDF Export**: Direct download of PDF file using jsPDF library
+- **DOCX Export**: HTML-based document (can be opened in Word)
+
+**Note**: PDF export now uses jsPDF library for direct PDF generation and download. The PDF will be automatically saved to your downloads folder with the patient's name and includes proper formatting with sections for patient information, clinical history, and AI analysis.
 
 ## API Endpoints
 
 - `GET /health` - Backend health check
 - `POST /segment` - Image segmentation endpoint
+- `POST /export-report` - Export medical reports in various formats
 
 ## Model Requirements
 
