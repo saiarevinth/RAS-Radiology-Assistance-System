@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import torch
 import numpy as np
@@ -6,16 +6,23 @@ import cv2
 import io
 import base64
 from PIL import Image
-from model import ResUNet50   # make sure model.py defines this
+from model import ResUNet50   # make sure model.py defines this0
 import json
 from datetime import datetime
 import os
+from pdf_extractor import extract_medical_fields_from_pdf
+from werkzeug.utils import secure_filename
 
 # Device configuration
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Initialize Flask app
 app = Flask(__name__)
+
+# Load configuration
+from config import Config
+app.config.from_object(Config)
+
 # Enable credentialed CORS so we can use HttpOnly cookies from the frontend
 CORS(
     app,
@@ -23,8 +30,16 @@ CORS(
     resources={r"/*": {"origins": ["http://localhost:3000", "http://127.0.0.1:3000"]}},
 )
 
+# Initialize database
+from models import db
+db.init_app(app)
+
+# Register blueprints
 from auth import auth_bp, require_auth  # noqa: E402
+from database import database_bp  # noqa: E402
+
 app.register_blueprint(auth_bp)
+app.register_blueprint(database_bp)
 
 # Simple model cache so you don't reload on every request
 _model_cache = {}
@@ -85,14 +100,122 @@ def overlay_mask(original_image, mask, alpha=0.5):
     result = cv2.addWeighted(original_image, 1.0, colored_mask, alpha, 0)
     return (result * 255).astype(np.uint8)
 
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint for frontend to verify backend connectivity"""
+    try:
+        # Check database connection
+        db.session.execute('SELECT 1')
+        return jsonify({
+            "status": "healthy",
+            "database": "connected",
+            "timestamp": datetime.utcnow().isoformat()
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "status": "unhealthy",
+            "database": "disconnected",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }), 500
+
+@app.route('/upload-pdf', methods=['POST'])
+def upload_pdf():
+    """Upload PDF file for patient intake"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "No file provided"}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"error": "No file selected"}), 400
+        
+        # Check if it's a PDF
+        if not file.filename.lower().endswith('.pdf'):
+            return jsonify({"error": "Only PDF files are allowed"}), 400
+        
+        # Create uploads directory if it doesn't exist
+        upload_folder = 'uploads'
+        if not os.path.exists(upload_folder):
+            os.makedirs(upload_folder)
+        
+        # Generate unique filename
+        import uuid
+        unique_filename = f"{uuid.uuid4()}_{secure_filename(file.filename)}"
+        file_path = os.path.join(upload_folder, unique_filename)
+        
+        # Save file
+        file.save(file_path)
+        
+        return jsonify({
+            "success": True,
+            "message": "PDF uploaded successfully",
+            "filename": unique_filename,
+            "file_path": file_path
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"error": f"Failed to upload PDF: {str(e)}"}), 500
+
+@app.route('/uploads/<filename>')
+def serve_uploaded_file(filename):
+    """Serve uploaded files"""
+    try:
+        return send_from_directory('uploads', filename)
+    except Exception as e:
+        return jsonify({"error": f"File not found: {str(e)}"}), 404
+
 def png_bytes_to_datauri(png_bytes):
     b64 = base64.b64encode(png_bytes).decode("ascii")
     return f"data:image/png;base64,{b64}"
 
-# Health check for React
-@app.route("/health", methods=["GET"])
-def health_check():
-    return jsonify({"status": "ok"}), 200
+
+
+# PDF extraction endpoint for patient intake
+@app.route("/extract-pdf", methods=["POST"])
+def extract_pdf():
+    """
+    Extract medical information from uploaded PDF files.
+    Expects multipart form data with 'file' field containing PDF.
+    """
+    try:
+        # Check if file was uploaded
+        if 'file' not in request.files:
+            return jsonify({"error": "No file provided"}), 400
+        
+        file = request.files['file']
+        
+        # Check if file is empty
+        if file.filename == '':
+            return jsonify({"error": "No file selected"}), 400
+        
+        # Check file type
+        if not file.filename.lower().endswith('.pdf'):
+            return jsonify({"error": "Only PDF files are supported"}), 400
+        
+        # Read file bytes
+        file_bytes = file.read()
+        
+        # Check file size (limit to 10MB)
+        if len(file_bytes) > 10 * 1024 * 1024:
+            return jsonify({"error": "File size too large. Maximum 10MB allowed."}), 400
+        
+        # Extract medical fields using the PDF extractor
+        extracted_data = extract_medical_fields_from_pdf(file_bytes)
+        
+        # Return extracted data
+        return jsonify({
+            "success": True,
+            "data": extracted_data,
+            "message": "PDF processed successfully"
+        }), 200
+        
+    except Exception as e:
+        print(f"PDF extraction error: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": f"Failed to process PDF: {str(e)}"
+        }), 500
 
 # API endpoint for segmentation
 @app.route("/segment", methods=["POST"])
@@ -104,7 +227,7 @@ def segment():
     if "image" not in request.files:
         return jsonify({"error": "no image file"}), 400
 
-    model_path = request.form.get("model_path", "ResUNet50.pth")
+    model_path = request.form.get("model_path", "resunet50_brain_segmentation.pth")
     image_file = request.files["image"]
 
     try:

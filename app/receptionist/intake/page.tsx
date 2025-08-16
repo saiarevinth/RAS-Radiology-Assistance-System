@@ -75,7 +75,7 @@ export default function ReceptionistIntakePage() {
     reportContent: "",
   })
 
-  const OLLAMA_URL = process.env.NEXT_PUBLIC_OLLAMA_URL || "http://localhost:11434"
+  const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000"
 
   useEffect(() => {
     if (!loading) {
@@ -320,147 +320,33 @@ export default function ReceptionistIntakePage() {
     return `File: ${file.name}, Size: ${(file.size / 1024).toFixed(1)} KB, Type: ${file.type}`
   }
 
-  const analyzeTextWithAI = async (text: string): Promise<Partial<IntakeForm>> => {
-    // Enhanced AI prompt with multiple strategies
-    const prompt = `You are an expert medical data extraction specialist. Your task is to extract patient information from medical reports and return ONLY valid JSON.
-
-CRITICAL: Return ONLY the JSON object, no additional text, no markdown, no explanations.
-
-JSON Format Required:
-{
-  "patientName": "extracted name or 'Unknown'",
-  "age": "extracted age or 'Unknown'", 
-  "sex": "extracted gender/sex or 'Unknown'",
-  "dob": "extracted date of birth in YYYY-MM-DD format or 'Unknown'",
-  "contactNumber": "extracted phone number or 'Unknown'",
-  "patientId": "extracted patient ID or 'Unknown'",
-  "abhaId": "extracted ABHA ID or 'Unknown'", 
-  "previousCondition": "extracted previous conditions or 'None reported'",
-  "currentMedication": "extracted current medications or 'None reported'",
-  "familyHistory": "extracted family history or 'None reported'",
-  "knownAllergy": "extracted allergies or 'None reported'",
-  "chiefComplaint": "extracted chief complaint or 'Not specified'",
-  "referringDoctor": "extracted referring doctor or 'Not specified'",
-  "neurologicalSymptom": "extracted neurological symptoms or 'None reported'", 
-  "treatmentHistory": "extracted treatment history or 'None reported'",
-  "symptomProgression": "extracted symptom progression or 'Not specified'",
-  "reportContent": "brief summary of report content or 'Report uploaded'"
-}
-
-Extraction Rules:
-1. NEVER return null - use descriptive text like 'Unknown', 'None reported', 'Not specified'
-2. Look for patterns: "Name:", "Age:", "Patient:", "DOB:", "Phone:", "Contact:"
-3. Extract dates in YYYY-MM-DD format when possible
-4. Combine related information into single fields
-5. If no specific info found, use context clues from the document
-6. For medical terms, preserve exact terminology
-7. Always fill ALL fields with meaningful text
-
-Document Content to Analyze:
-${text.substring(0, 5000)}`
-
+    const extractDataFromPDF = async (file: File): Promise<Partial<IntakeForm>> => {
     try {
-      const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+      // Create FormData for file upload
+      const formData = new FormData()
+      formData.append('file', file)
+      
+      const response = await fetch(`${BACKEND_URL}/extract-pdf`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "llama3.2",
-          prompt: prompt,
-          stream: false,
-          options: {
-            temperature: 0.1,
-            top_p: 0.9,
-            num_predict: 1000,
-          }
-        })
+        body: formData,
       })
 
       if (!response.ok) {
-        throw new Error(`AI service error: ${response.status} ${response.statusText}`)
+        const errorData = await response.json()
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`)
       }
 
-      const data = await response.json()
-      let aiResponse = data.response?.trim() || ""
+      const result = await response.json()
       
-      console.log('Raw AI response:', aiResponse)
-      
-      // Multiple JSON extraction strategies
-      let extractedData = null
-      
-      // Strategy 1: Direct JSON parse
-      try {
-        extractedData = JSON.parse(aiResponse)
-        console.log('Direct JSON parse successful')
-      } catch (error) {
-        console.log('Direct JSON parse failed, trying extraction...')
-        
-        // Strategy 2: Extract JSON with regex
-        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/)
-        if (jsonMatch) {
-          try {
-            extractedData = JSON.parse(jsonMatch[0])
-            console.log('Regex JSON extraction successful')
-          } catch (error2) {
-            console.log('Regex JSON extraction failed')
-          }
-        }
-        
-        // Strategy 3: Manual field extraction as fallback
-        if (!extractedData) {
-          console.log('Using manual field extraction fallback')
-          extractedData = extractFieldsManually(aiResponse, text)
-        }
+      if (!result.success) {
+        throw new Error(result.error || 'PDF extraction failed')
       }
       
-      if (!extractedData) {
-        throw new Error('Failed to extract data from AI response')
-      }
-      
-      // Ensure all required fields exist with meaningful values
-      const guaranteedData: Partial<IntakeForm> = {}
-      const requiredFields = [
-        "patientName", "age", "sex", "dob", "contactNumber", "patientId", "abhaId",
-        "previousCondition", "currentMedication", "familyHistory", "knownAllergy",
-        "chiefComplaint", "referringDoctor", "neurologicalSymptom", "treatmentHistory",
-        "symptomProgression", "reportContent"
-      ]
-      
-      requiredFields.forEach(field => {
-        const value = extractedData[field]
-        if (value && value !== null && value !== "null" && value.trim() !== "") {
-          guaranteedData[field as keyof IntakeForm] = value.trim()
-        } else {
-          // Provide meaningful defaults
-          const defaults = {
-            patientName: "Patient name not found",
-            age: "Age not specified",
-            sex: "Gender not specified",
-            dob: "Date of birth not found",
-            contactNumber: "Contact number not provided",
-            patientId: "Patient ID not found",
-            abhaId: "ABHA ID not found",
-            previousCondition: "No previous conditions reported",
-            currentMedication: "No current medications listed",
-            familyHistory: "No family history provided",
-            knownAllergy: "No known allergies reported",
-            chiefComplaint: "Chief complaint not specified",
-            referringDoctor: "Referring doctor not mentioned",
-            neurologicalSymptom: "No neurological symptoms reported",
-            treatmentHistory: "No treatment history provided",
-            symptomProgression: "Symptom progression not described",
-            reportContent: "Medical report uploaded for review"
-          }
-          guaranteedData[field as keyof IntakeForm] = defaults[field as keyof IntakeForm]
-        }
-      })
-      
-      console.log('Guaranteed data:', guaranteedData)
-      return guaranteedData
+      console.log('PDF extraction result:', result.data)
+      return result.data
       
     } catch (error) {
-      console.error('AI analysis failed:', error)
+      console.error('PDF extraction failed:', error)
       // Return fallback data structure
       return {
         patientName: "Patient name not found",
@@ -481,6 +367,31 @@ ${text.substring(0, 5000)}`
         symptomProgression: "Symptom progression not described",
         reportContent: "Medical report uploaded for review"
       }
+    }
+  }
+
+  // Fallback AI analysis function for non-PDF files and manual text
+  const analyzeTextWithAI = async (text: string): Promise<Partial<IntakeForm>> => {
+    // For now, return a basic structure - you can implement AI analysis here if needed
+    // or remove this function entirely if you only want PDF extraction
+    return {
+      patientName: "Patient name not found",
+      age: "Age not specified",
+      sex: "Gender not specified",
+      dob: "Date of birth not found",
+      contactNumber: "Contact number not provided",
+      patientId: "Patient ID not found",
+      abhaId: "ABHA ID not found",
+      previousCondition: "No previous conditions reported",
+      currentMedication: "No current medications listed",
+      familyHistory: "No family history provided",
+      knownAllergy: "No known allergies reported",
+      chiefComplaint: "Chief complaint not specified",
+      referringDoctor: "Referring doctor not mentioned",
+      neurologicalSymptom: "No neurological symptoms reported",
+      treatmentHistory: "No treatment history provided",
+      symptomProgression: "Symptom progression not described",
+      reportContent: "Report uploaded for review"
     }
   }
 
@@ -548,22 +459,36 @@ ${text.substring(0, 5000)}`
     try {
       let textToAnalyze = ""
       
+      let extractedData: Partial<IntakeForm> = {}
+      
       if (selectedReport) {
-        setExtractionStatus(prev => ({ ...prev, progress: "Extracting text from file..." }))
-        textToAnalyze = await extractTextFromFile(selectedReport)
+        setExtractionStatus(prev => ({ ...prev, progress: "Extracting data from PDF..." }))
+        
+        // Use PDF extraction for PDF files
+        if (selectedReport.type === 'application/pdf') {
+          extractedData = await extractDataFromPDF(selectedReport)
+        } else {
+          // For other file types, use text extraction
+          let textToAnalyze = await extractTextFromFile(selectedReport)
+          if (manualText.trim()) {
+            textToAnalyze += (textToAnalyze ? "\n\n" : "") + manualText.trim()
+          }
+          
+          if (!textToAnalyze || textToAnalyze.trim().length < 10) {
+            throw new Error("No meaningful text found. Please check your file or enter text manually.")
+          }
+          
+          // For non-PDF files, still use AI analysis (you can keep the old function if needed)
+          setExtractionStatus(prev => ({ ...prev, progress: "Analyzing with AI..." }))
+          extractedData = await analyzeTextWithAI(textToAnalyze)
+        }
+      } else if (manualText.trim()) {
+        // Only manual text - use AI analysis
+        setExtractionStatus(prev => ({ ...prev, progress: "Analyzing with AI..." }))
+        extractedData = await analyzeTextWithAI(manualText.trim())
+      } else {
+        throw new Error("Please select a report file or enter text manually")
       }
-      
-      if (manualText.trim()) {
-        textToAnalyze += (textToAnalyze ? "\n\n" : "") + manualText.trim()
-      }
-      
-      if (!textToAnalyze || textToAnalyze.trim().length < 10) {
-        throw new Error("No meaningful text found. Please check your file or enter text manually.")
-      }
-      
-      setExtractionStatus(prev => ({ ...prev, progress: "Analyzing with AI..." }))
-      
-      const extractedData = await analyzeTextWithAI(textToAnalyze)
       
       // Count fields with meaningful data (not default placeholder text)
       const extractedFieldCount = Object.keys(extractedData).filter(key => {
@@ -687,12 +612,81 @@ ${text.substring(0, 5000)}`
         throw new Error(`Please fill in required fields: ${missingFields.join(', ')}`)
       }
       
-      // For now, store locally. In future, POST to backend.
-      console.log("Intake form saved:", form)
+      let pdfFilePath = null
+      
+      // Upload PDF if selected
+      if (selectedReport && selectedReport.type === 'application/pdf') {
+        const formData = new FormData()
+        formData.append('file', selectedReport)
+        
+        const uploadResponse = await fetch(`${BACKEND_URL}/upload-pdf`, {
+          method: 'POST',
+          body: formData,
+          credentials: 'include',
+        })
+        
+        if (!uploadResponse.ok) {
+          const errorData = await uploadResponse.json()
+          throw new Error(errorData.error || 'Failed to upload PDF')
+        }
+        
+        const uploadResult = await uploadResponse.json()
+        pdfFilePath = uploadResult.file_path
+      }
+      
+      // Prepare data for API
+      const intakeData = {
+        patientName: form.patientName,
+        age: form.age,
+        sex: form.sex,
+        dob: form.dob,
+        contactNumber: form.contactNumber,
+        patientId: form.patientId,
+        abhaId: form.abhaId,
+        previousCondition: form.previousCondition,
+        currentMedication: form.currentMedication,
+        familyHistory: form.familyHistory,
+        knownAllergy: form.knownAllergy,
+        chiefComplaint: form.chiefComplaint,
+        referringDoctor: form.referringDoctor,
+        neurologicalSymptom: form.neurologicalSymptom,
+        treatmentHistory: form.treatmentHistory,
+        symptomProgression: form.symptomProgression,
+        reportContent: form.reportContent,
+        previousReportPdf: pdfFilePath,
+        extractedData: extractionStatus.success ? {
+          extractedFields: extractionStatus.extractedFields,
+          timestamp: new Date().toISOString()
+        } : null
+      }
+      
+      // Save to database
+      const response = await fetch(`${BACKEND_URL}/api/intake`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify(intakeData)
+      })
+      
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`)
+      }
+      
+      const result = await response.json()
+      console.log("Patient intake saved successfully:", result)
+      
       setSaveSuccess(true)
-      setTimeout(() => setSaveSuccess(false), 2500)
+      setTimeout(() => setSaveSuccess(false), 3000)
+      
+      // Clear form after successful save
+      clearExtractedData()
+      
     } catch (err: any) {
-      setError(err?.message || "Failed to save intake")
+      console.error("Save error:", err)
+      setError(err?.message || "Failed to save patient intake")
     } finally {
       setIsSaving(false)
     }
@@ -741,10 +735,10 @@ ${text.substring(0, 5000)}`
           <CardContent>
             {/* Report Upload and Text Input Section */}
             <div className="mb-8 space-y-4 p-6 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
-              <div className="flex items-center gap-2 mb-4">
-                <FileText className="h-5 w-5 text-blue-600" />
-                <h3 className="font-semibold text-blue-900">AI-Assisted Data Extraction</h3>
-              </div>
+                          <div className="flex items-center gap-2 mb-4">
+              <FileText className="h-5 w-5 text-blue-600" />
+              <h3 className="font-semibold text-blue-900">PDF Data Extraction</h3>
+            </div>
               
               {/* File Upload */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -789,11 +783,11 @@ ${text.substring(0, 5000)}`
               {/* Manual Text Input */}
               <div>
                 <Label htmlFor="manualText" className="text-sm font-medium">
-                  Or Paste Report Content Manually
+                  Or Paste Report Content Manually (for non-PDF files)
                 </Label>
                 <Textarea
                   id="manualText"
-                  placeholder="Copy and paste patient report content here for AI analysis..."
+                  placeholder="Copy and paste patient report content here for manual analysis..."
                   rows={4}
                   value={manualText}
                   onChange={(e) => setManualText(e.target.value)}

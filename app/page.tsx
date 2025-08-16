@@ -23,10 +23,7 @@ interface SegmentationResult {
   affected_percentage: number
 }
 
-interface BackendStatus {
-  connected: boolean
-  message: string
-}
+// Removed BackendStatus check feature
 
 interface PatientInfo {
   // Medical History
@@ -62,13 +59,10 @@ export default function RadiologistAssistance() {
   const { user, loading, logout } = useAuth()
   const router = useRouter()
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [modelPath, setModelPath] = useState("ResUNet50.pth")
   const [isProcessing, setIsProcessing] = useState(false)
   const [result, setResult] = useState<SegmentationResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [backendStatus, setBackendStatus] = useState<BackendStatus>({ connected: false, message: "Not checked" })
-  const [isCheckingBackend, setIsCheckingBackend] = useState(false)
   const [showPatientForm, setShowPatientForm] = useState(false)
   
   // Patient Information State
@@ -96,6 +90,14 @@ export default function RadiologistAssistance() {
   const [isExporting, setIsExporting] = useState(false)
   const [patientName, setPatientName] = useState("")
   const [saveSuccess, setSaveSuccess] = useState(false)
+  const [isSavingReport, setIsSavingReport] = useState(false)
+  const [saveReportError, setSaveReportError] = useState<string | null>(null)
+
+  // Patient Search State
+  const [patientSearchId, setPatientSearchId] = useState("")
+  const [isSearchingPatient, setIsSearchingPatient] = useState(false)
+  const [currentPatient, setCurrentPatient] = useState<any>(null)
+  const [patientSearchError, setPatientSearchError] = useState<string | null>(null)
 
   // Backend URL - can be configured via environment variable
   const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000"
@@ -129,28 +131,61 @@ export default function RadiologistAssistance() {
     return null
   }
 
-  const checkBackendStatus = async () => {
-    setIsCheckingBackend(true)
+  // Removed backend status check function
+
+  const searchPatient = async () => {
+    if (!patientSearchId.trim()) {
+      setPatientSearchError("Please enter a patient ID")
+      return
+    }
+
+    setIsSearchingPatient(true)
+    setPatientSearchError(null)
+    setCurrentPatient(null)
+
     try {
-      const response = await fetch(`${BACKEND_URL}/health`, {
+      const response = await fetch(`${BACKEND_URL}/api/patients/search-by-id?patient_id=${encodeURIComponent(patientSearchId.trim())}`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include",
       })
 
-      if (response.ok) {
-        setBackendStatus({ connected: true, message: "Backend connected successfully" })
-      } else {
-        setBackendStatus({ connected: false, message: `Backend responded with status ${response.status}` })
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`)
       }
-    } catch (err) {
-      setBackendStatus({
-        connected: false,
-        message: `Cannot connect to backend at ${BACKEND_URL}. Make sure Flask server is running.`,
-      })
+
+      const result = await response.json()
+      setCurrentPatient(result.patient)
+      
+      // Auto-populate patient information if available
+      if (result.patient.intake) {
+        const intake = result.patient.intake
+        setPatientName(result.patient.full_name)
+        setPatientInfo(prev => ({
+          ...prev,
+          medicalHistory: intake.previous_condition || "",
+          previousConditions: intake.previous_condition || "",
+          currentMedications: intake.current_medication || "",
+          familyHistory: intake.family_history || "",
+          knownAllergies: intake.known_allergy || "",
+          chiefComplaint: intake.chief_complaint || "",
+          referringPhysician: intake.referring_doctor || "",
+          neurologicalSymptoms: intake.neurological_symptom || "",
+          treatmentHistory: intake.treatment_history || "",
+          symptomProgression: intake.symptom_progression || "",
+          additionalNotes: intake.report_content || ""
+        }))
+      }
+
+      console.log("Patient found:", result.patient)
+    } catch (err: any) {
+      console.error("Patient search error:", err)
+      setPatientSearchError(err?.message || "Failed to search for patient")
     } finally {
-      setIsCheckingBackend(false)
+      setIsSearchingPatient(false)
     }
   }
 
@@ -583,18 +618,12 @@ Format the report professionally for medical documentation.`,
       return
     }
 
-    if (!backendStatus.connected) {
-      setError("Backend is not connected. Please check the connection first.")
-      return
-    }
-
     setIsProcessing(true)
     setError(null)
 
     try {
       const formData = new FormData()
       formData.append("image", selectedFile)
-      formData.append("model_path", modelPath)
       
       // Add patient information to form data
       Object.entries(patientInfo).forEach(([key, value]) => {
@@ -624,6 +653,57 @@ Format the report professionally for medical documentation.`,
       }
     } finally {
       setIsProcessing(false)
+    }
+  }
+
+  // Save AI/Edited report to DB by updating latest patient report (doctor role required)
+  const saveReportToDB = async () => {
+    if (!aiReport || !currentPatient || !currentPatient.medical_reports || currentPatient.medical_reports.length === 0) {
+      setSaveReportError("No existing report found to update. Ask reception to create a report for this patient.")
+      return
+    }
+    try {
+      setIsSavingReport(true)
+      setSaveReportError(null)
+
+      const latestReport = currentPatient.medical_reports[0]
+      const payload = {
+        ai_generated_report: aiReport.content,
+        doctor_review: editedReportContent || aiReport.content,
+        affected_percentage: result?.affected_percentage,
+      }
+
+      const resp = await fetch(`${BACKEND_URL}/api/reports/${latestReport.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      })
+
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({}))
+        throw new Error(errData.error || `Failed to save report (HTTP ${resp.status})`)
+      }
+
+      // Refresh local patient reports list to reflect changes
+      try {
+        const refreshed = await fetch(`${BACKEND_URL}/api/patients/search-by-id?patient_id=${encodeURIComponent(currentPatient.patient_id)}`, {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+        })
+        if (refreshed.ok) {
+          const json = await refreshed.json()
+          setCurrentPatient(json.patient)
+        }
+      } catch {}
+
+      setSaveSuccess(true)
+      setTimeout(() => setSaveSuccess(false), 3000)
+    } catch (e: any) {
+      setSaveReportError(e?.message || "Failed to save report to DB")
+    } finally {
+      setIsSavingReport(false)
     }
   }
 
@@ -660,38 +740,164 @@ Format the report professionally for medical documentation.`,
           </p>
         </div>
 
-        {/* Backend Status Card */}
+        {/* Backend status card removed */}
+
+        {/* Patient Search Section */}
         <Card className="mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Activity className="h-5 w-5" />
-              Backend Connection Status
+              <UserCheck className="h-5 w-5" />
+              Patient Search
             </CardTitle>
+            <CardDescription>Search for existing patients by their Patient ID to load their information</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                {backendStatus.connected ? (
-                  <CheckCircle className="h-5 w-5 text-green-600" />
-                ) : (
-                  <AlertCircle className="h-5 w-5 text-red-600" />
-                )}
-                <span className={backendStatus.connected ? "text-green-700" : "text-red-700"}>
-                  {backendStatus.message}
-                </span>
+            <div className="flex gap-4 items-end">
+              <div className="flex-1">
+                <Label htmlFor="patientSearchId">Patient ID</Label>
+                <Input
+                  id="patientSearchId"
+                  placeholder="Enter Patient ID (e.g., PAT-20241201-ABC12345)"
+                  value={patientSearchId}
+                  onChange={(e) => setPatientSearchId(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && searchPatient()}
+                />
               </div>
-              <Button onClick={checkBackendStatus} disabled={isCheckingBackend} variant="outline" size="sm">
-                {isCheckingBackend ? (
+              <Button 
+                onClick={searchPatient} 
+                disabled={isSearchingPatient || !patientSearchId.trim()}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {isSearchingPatient ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Checking...
+                    Searching...
                   </>
                 ) : (
-                  "Check Connection"
+                  <>
+                    <User className="mr-2 h-4 w-4" />
+                    Search Patient
+                  </>
                 )}
               </Button>
             </div>
-            <p className="text-sm text-gray-500 mt-2">Backend URL: {BACKEND_URL}</p>
+
+            {patientSearchError && (
+              <Alert className="mt-4 border-red-200 bg-red-50">
+                <AlertCircle className="h-4 w-4 text-red-600" />
+                <AlertDescription className="text-red-800">
+                  {patientSearchError}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {currentPatient && (
+              <div className="mt-6 space-y-4">
+                <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                  <h3 className="font-semibold text-green-900 mb-2">Patient Found</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <span className="font-medium text-gray-700">Name:</span>
+                      <p className="text-green-800">{currentPatient.full_name}</p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-700">Patient ID:</span>
+                      <p className="text-green-800">{currentPatient.patient_id}</p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-700">Age:</span>
+                      <p className="text-green-800">{currentPatient.intake?.age || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-700">Contact:</span>
+                      <p className="text-green-800">{currentPatient.intake?.contact_number || 'N/A'}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {currentPatient.intake && (
+                  <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                    <h4 className="font-semibold text-blue-900 mb-2">Intake Information</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="font-medium text-gray-700">Chief Complaint:</span>
+                        <p className="text-blue-800">{currentPatient.intake.chief_complaint || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-700">Referring Doctor:</span>
+                        <p className="text-blue-800">{currentPatient.intake.referring_doctor || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-700">Previous Conditions:</span>
+                        <p className="text-blue-800">{currentPatient.intake.previous_condition || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-700">Current Medications:</span>
+                        <p className="text-blue-800">{currentPatient.intake.current_medication || 'N/A'}</p>
+                      </div>
+                    </div>
+                    {/* Uploaded Intake PDF */}
+                    {currentPatient.intake.previous_report_pdf && (
+                      <div className="mt-4 p-3 bg-white rounded border flex items-center justify-between">
+                        <div className="text-sm">
+                          <span className="font-medium text-gray-700">Uploaded Report (PDF): </span>
+                          <span className="text-gray-600">
+                            {(() => {
+                              const fullPath = currentPatient.intake.previous_report_pdf as string
+                              const fileName = fullPath.split(/[/\\]/).pop()
+                              return fileName || 'report.pdf'
+                            })()}
+                          </span>
+                        </div>
+                        {(() => {
+                          const fullPath = currentPatient.intake.previous_report_pdf as string
+                          const fileName = fullPath.split(/[/\\]/).pop()
+                          const href = fileName ? `${BACKEND_URL}/uploads/${fileName}` : undefined
+                          return href ? (
+                            <a href={href} target="_blank" rel="noopener noreferrer">
+                              <Button variant="outline" size="sm">
+                                <Download className="mr-2 h-4 w-4" />
+                                View / Download
+                              </Button>
+                            </a>
+                          ) : null
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {currentPatient.medical_reports && currentPatient.medical_reports.length > 0 && (
+                  <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                    <h4 className="font-semibold text-purple-900 mb-2">Previous Reports ({currentPatient.medical_reports.length})</h4>
+                    <div className="space-y-2">
+                      {currentPatient.medical_reports.map((report: any, index: number) => (
+                        <div key={report.id} className="bg-white p-3 rounded border">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <p className="font-medium text-purple-800">{report.report_type}</p>
+                              <p className="text-sm text-gray-600">
+                                {new Date(report.report_date).toLocaleDateString()} - {report.status}
+                              </p>
+                            </div>
+                            {report.original_pdf_path && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => window.open(`${BACKEND_URL}/uploads/${report.original_pdf_path.split('/').pop()}`, '_blank')}
+                              >
+                                <FileDown className="mr-2 h-4 w-4" />
+                                View PDF
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -704,10 +910,27 @@ Format the report professionally for medical documentation.`,
                 <CardTitle className="flex items-center gap-2">
                   <UserCheck className="h-5 w-5" />
                   Patient Information
+                  {currentPatient && (
+                    <Badge variant="secondary" className="text-xs bg-green-100 text-green-800 border-green-200">Patient Data Loaded</Badge>
+                  )}
                 </CardTitle>
-                <CardDescription>Enter patient details for comprehensive analysis</CardDescription>
+                <CardDescription>
+                  {currentPatient 
+                    ? `Patient data loaded for ${currentPatient.full_name} (${currentPatient.patient_id})`
+                    : "Enter patient details for comprehensive analysis"
+                  }
+                </CardDescription>
               </CardHeader>
               <CardContent>
+                {currentPatient && (
+                  <Alert className="mb-4 border-green-200 bg-green-50">
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                    <AlertDescription className="text-green-800">
+                      Patient information loaded from database. You can now proceed with image analysis.
+                    </AlertDescription>
+                  </Alert>
+                )}
+                
                 <div className="space-y-4">
                   {/* Patient Name */}
                   <div className="space-y-2">
@@ -900,26 +1123,13 @@ Format the report professionally for medical documentation.`,
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Upload className="h-5 w-5" />
-                Image Upload & Configuration
+                Image Upload
               </CardTitle>
-              <CardDescription>Select a medical image and configure the segmentation model</CardDescription>
+              <CardDescription>Select a medical image for segmentation</CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-6">
-                <div className="space-y-2">
-                  <Label htmlFor="model_path">Model Path</Label>
-                  <Input
-                    id="model_path"
-                    type="text"
-                    value={modelPath}
-                    onChange={(e) => setModelPath(e.target.value)}
-                    placeholder="resunet50_brain_segmentation.pth"
-                    className="font-mono text-sm"
-                  />
-                  <p className="text-xs text-gray-500">
-                    Specify the model file path (relative to Flask project folder or absolute path)
-                  </p>
-                </div>
+                {/* Model path input removed: using default model on backend */}
 
                 <div className="space-y-2">
                   <Label htmlFor="image">Medical Image</Label>
@@ -952,7 +1162,7 @@ Format the report professionally for medical documentation.`,
 
                 <Button
                   type="submit"
-                  disabled={isProcessing || !selectedFile || !backendStatus.connected}
+                  disabled={isProcessing || !selectedFile}
                   className="w-full"
                 >
                   {isProcessing ? (
@@ -1051,9 +1261,7 @@ Format the report professionally for medical documentation.`,
                 <div className="text-center py-12 text-gray-500">
                   <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
                   <p>Upload an image and run segmentation to see results here</p>
-                  {!backendStatus.connected && (
-                    <p className="text-red-500 text-sm mt-2">Please check backend connection first</p>
-                  )}
+                  
                 </div>
               )}
             </CardContent>
@@ -1140,7 +1348,26 @@ Format the report professionally for medical documentation.`,
                             </div>
                           </DialogContent>
                         </Dialog>
+                        <Button onClick={saveReportToDB} size="sm" disabled={isSavingReport || !currentPatient} className="ml-auto">
+                          {isSavingReport ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Saving...
+                            </>
+                          ) : (
+                            <>
+                              <Save className="mr-2 h-4 w-4" />
+                              Save to DB
+                            </>
+                          )}
+                        </Button>
                       </div>
+                      {saveReportError && (
+                        <Alert className="mt-2 border-red-200 bg-red-50">
+                          <AlertCircle className="h-4 w-4 text-red-600" />
+                          <AlertDescription className="text-red-800">{saveReportError}</AlertDescription>
+                        </Alert>
+                      )}
                     </TabsContent>
                     
                     <TabsContent value="edit" className="space-y-4">
@@ -1178,7 +1405,26 @@ Format the report professionally for medical documentation.`,
                         >
                           Cancel
                         </Button>
+                        <Button onClick={saveReportToDB} size="sm" disabled={isSavingReport || !currentPatient} className="ml-auto">
+                          {isSavingReport ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Saving...
+                            </>
+                          ) : (
+                            <>
+                              <Save className="mr-2 h-4 w-4" />
+                              Save to DB
+                            </>
+                          )}
+                        </Button>
                       </div>
+                      {saveReportError && (
+                        <Alert className="mt-2 border-red-200 bg-red-50">
+                          <AlertCircle className="h-4 w-4 text-red-600" />
+                          <AlertDescription className="text-red-800">{saveReportError}</AlertDescription>
+                        </Alert>
+                      )}
                     </TabsContent>
                   </Tabs>
                 </CardContent>

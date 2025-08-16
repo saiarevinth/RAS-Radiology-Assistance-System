@@ -48,7 +48,7 @@ AUTHORIZED_DOCTORS = [
         full_name="Dr. John Smith",
         specialty="Radiology",
         department="Radiology Department",
-        password_hash=generate_password_hash("Smith2024!")
+        password_hash=generate_password_hash("123")
     ),
     Doctor(
         email="dr.johnson@hospital.com",
@@ -103,7 +103,7 @@ AUTHORIZED_RECEPTIONISTS: List[Receptionist] = [
         email="reception@hospital.com",
         full_name="Alex Parker",
         department="Front Desk",
-        password_hash=generate_password_hash("Reception2024")
+        password_hash=generate_password_hash("1234")
     )
 ]
 
@@ -328,9 +328,30 @@ def doctor_count():
     })
 
 
-def require_auth(request_obj) -> Optional[Doctor]:
+def require_auth(request_obj) -> Optional[Union[Doctor, Receptionist]]:
     """Require authentication for protected routes"""
     token = request_obj.cookies.get(SESSION_COOKIE_NAME)
-    return _verify_session(token) if token else None
+    user_obj = _verify_session(token) if token else None
+    
+    if user_obj:
+        # Create a wrapper object with all necessary attributes for database compatibility
+        class UserWrapper:
+            def __init__(self, original_user, role, user_id):
+                self.original_user = original_user
+                self.role = role
+                self.id = user_id
+                # Copy all attributes from original user
+                for attr in dir(original_user):
+                    if not attr.startswith('_'):
+                        setattr(self, attr, getattr(original_user, attr))
+        
+        if hasattr(user_obj, 'email'):
+            email = user_obj.email.lower()
+            if email in ACTIVE_DOCTORS:
+                return UserWrapper(user_obj, "doctor", 1)
+            elif email in ACTIVE_RECEPTIONISTS:
+                return UserWrapper(user_obj, "receptionist", 2)
+    
+    return user_obj
 
 
