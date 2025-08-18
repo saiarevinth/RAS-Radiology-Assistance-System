@@ -1,4 +1,4 @@
-Radiologist Assistance System (RAS)
+### Radiologist Assistance System (RAS)
 
 A comprehensive medical imaging platform that combines AI-powered image segmentation with patient intake and reporting workflows for receptionists and doctors.
 
