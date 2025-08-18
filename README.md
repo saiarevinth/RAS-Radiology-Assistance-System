@@ -1,4 +1,4 @@
-# Radiologist Assistance System (RAS)
+Radiologist Assistance System (RAS)
 
 A comprehensive medical imaging platform that combines AI-powered image segmentation with patient intake and reporting workflows for receptionists and doctors.
 
@@ -195,15 +195,6 @@ curl -X POST http://localhost:5000/segment \
 - Doctor: can search patients, run segmentation, and update reports.
 - Protected routes require a valid session cookie (see `auth.py` and `/auth/*` endpoints).
 
-## Error Handling
-
-- Common HTTP status codes:
-  - `400` for invalid inputs (e.g., missing file, wrong type).
-  - `401` for unauthorized access (missing/invalid session cookie).
-  - `404` for missing resources (e.g., file not found in uploads).
-  - `500` for unexpected server errors.
-- The `/health` endpoint returns diagnostic info for backend connectivity.
-
 ## Database Overview
 
 - `patients` — Patient basic details
@@ -244,16 +235,6 @@ NEXT_PUBLIC_OLLAMA_URL=http://localhost:11434
 - Input validation and sanitization
 - Secure file upload handling
 - CORS for development
-
-## License
-
-MIT License (see LICENSE)
-
-## Support
-
-- Open an issue
-- Check Troubleshooting
-- Review API docs
 
 ---
 
