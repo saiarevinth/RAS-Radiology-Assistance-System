@@ -119,7 +119,7 @@ export default function LoginPage() {
         <div className="text-center">
           <div className="flex items-center justify-center gap-2 mb-4">
             <Shield className="h-8 w-8 text-blue-600" />
-            <h1 className="text-2xl font-bold text-gray-900">Hospital Login</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Hospital Staff Login</h1>
           </div>
           <p className="text-gray-600">Authorized medical staff only</p>
         </div>
