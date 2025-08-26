@@ -121,6 +121,8 @@ class PatientIntake(db.Model):
     # Assignment
     assigned_doctor_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     
+    # High Priority Flag
+    high_priority = db.Column(db.Boolean, nullable=True)
     # Session Information
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -153,7 +155,8 @@ class PatientIntake(db.Model):
             'extracted_data': self.extracted_data,
             'created_by': self.created_by,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'high_priority': self.high_priority
         }
 
 class MedicalReport(db.Model):

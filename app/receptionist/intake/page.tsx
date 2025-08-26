@@ -30,6 +30,7 @@ interface IntakeForm {
   treatmentHistory: string
   symptomProgression: string
   reportContent: string
+  highPriority: boolean // Receptionist can tick this
 }
 
 interface ExtractionStatus {
@@ -85,6 +86,7 @@ export default function ReceptionistIntakePage() {
     treatmentHistory: "",
     symptomProgression: "",
     reportContent: "",
+    highPriority: false,
   })
 
   const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000"
@@ -114,7 +116,7 @@ export default function ReceptionistIntakePage() {
     return null
   }
 
-  const handleChange = (field: keyof IntakeForm, value: string | number) => {
+  const handleChange = (field: keyof IntakeForm, value: string | number | boolean) => {
     setForm((prev) => ({ ...prev, [field]: value }))
   }
 
@@ -579,25 +581,6 @@ export default function ReceptionistIntakePage() {
   }
 
   const clearExtractedData = () => {
-    const clearedForm: IntakeForm = {
-      patientName: "",
-      age: "",
-      sex: "",
-      dob: "",
-      contactNumber: "",
-      patientId: "",
-      abhaId: "",
-      previousCondition: "",
-      currentMedication: "",
-      familyHistory: "",
-      knownAllergy: "",
-      chiefComplaint: "",
-      referringDoctor: "",
-      neurologicalSymptom: "",
-      treatmentHistory: "",
-      symptomProgression: "",
-      reportContent: "",
-    }
     setForm({
       patientName: "",
       age: "",
@@ -616,7 +599,8 @@ export default function ReceptionistIntakePage() {
       neurologicalSymptom: "",
       treatmentHistory: "",
       symptomProgression: "",
-      reportContent: ""
+      reportContent: "",
+      highPriority: false,
     })
     setSelectedReport(null)
     setManualText("")
@@ -744,7 +728,8 @@ export default function ReceptionistIntakePage() {
         extractedData: extractionStatus.success ? {
           extractedFields: extractionStatus.extractedFields,
           timestamp: new Date().toISOString()
-        } : null
+        } : null,
+        highPriority: form.highPriority,
       };
       const response = await fetch(`${BACKEND_URL}/api/intake`, {
         method: 'POST',
@@ -778,7 +763,13 @@ export default function ReceptionistIntakePage() {
     return "empty"
   }
 
-  const filledFieldsCount = Object.values(form).filter(value => value && value.trim() !== "").length
+  const filledFieldsCount = Object.values(form).filter(value => {
+  if (typeof value === "string") {
+    return value.trim() !== "";
+  }
+  // For booleans or other types, consider them filled if truthy
+  return Boolean(value);
+}).length
   const totalFieldsCount = Object.keys(form).length
 
   return (
@@ -1237,6 +1228,23 @@ export default function ReceptionistIntakePage() {
                     Assigned
                   </p>
                 )}
+              </div>
+
+              {/* Priority Level Dropdown */}
+              <div className="space-y-2">
+                <Label htmlFor="priorityLevel">Priority Level</Label>
+                <select
+                  id="priorityLevel"
+                  value={form.highPriority ? "high" : "normal"}
+                  onChange={e => handleChange("highPriority", e.target.value === "high")}
+                  className={form.highPriority ? "border-red-500 bg-red-50" : "border-gray-300"}
+                >
+                  <option value="normal">Normal</option>
+                  <option value="high">High</option>
+                </select>
+                <p className="text-xs text-gray-600">
+                  Mark as <span className={form.highPriority ? "text-red-700 font-bold" : "text-gray-700"}>{form.highPriority ? "High" : "Normal"}</span> priority.
+                </p>
               </div>
 
               <div className="space-y-2">

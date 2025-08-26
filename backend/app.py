@@ -14,6 +14,7 @@ from pdf_extractor import extract_medical_fields_from_pdf
 from werkzeug.utils import secure_filename
 
 # Device configuration
+
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Initialize Flask app
@@ -48,10 +49,32 @@ from models import db, Patient, PatientIntake, User, MedicalReport
 # --- Doctor profile patient lists ---
 @app.route('/api/doctor/<int:doctor_id>/assigned-patients', methods=['GET'])
 def get_assigned_patients(doctor_id):
-    intakes = PatientIntake.query.filter_by(assigned_doctor_id=doctor_id).all()
-    patient_ids = list({intake.patient_id for intake in intakes})
+    # Get all intakes assigned to this doctor
+    intakes = PatientIntake.query.filter_by(assigned_doctor_id=doctor_id).order_by(PatientIntake.created_at.desc()).all()
+    # Map patient_id to latest intake (by created_at)
+    latest_intake_by_patient = {}
+    for intake in intakes:
+        pid = intake.patient_id
+        if pid not in latest_intake_by_patient or intake.created_at > latest_intake_by_patient[pid].created_at:
+            latest_intake_by_patient[pid] = intake
+    patient_ids = list(latest_intake_by_patient.keys())
     patients = Patient.query.filter(Patient.id.in_(patient_ids)).all() if patient_ids else []
-    return jsonify({'assigned_patients': [p.to_dict() for p in patients]})
+    # Combine patient and latest intake info
+    assigned_patients = []
+    for patient in patients:
+        intake = latest_intake_by_patient.get(patient.id)
+        patient_dict = patient.to_dict()
+        if intake:
+            intake_dict = intake.to_dict()
+            # Merge relevant intake fields (including high_priority) into patient_dict
+            patient_dict['intake'] = intake_dict
+            patient_dict['high_priority'] = intake_dict.get('high_priority', False)
+        else:
+            patient_dict['intake'] = None
+            patient_dict['high_priority'] = False
+        assigned_patients.append(patient_dict)
+    return jsonify({'assigned_patients': assigned_patients})
+
 
 @app.route('/api/doctor/<int:doctor_id>/attended-patients', methods=['GET'])
 def get_attended_patients(doctor_id):
