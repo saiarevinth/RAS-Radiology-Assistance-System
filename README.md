@@ -21,13 +21,18 @@ A comprehensive medical imaging platform that combines AI-powered image segmenta
 - **Assigned & Attended Patients List**: View assigned and attended patients in the doctor profile page. Assigned patients are those allocated by reception; attended patients are those for whom the doctor has performed extraction/segmentation or manually marked as attended.
 - **Mark as Attended**: Doctors can mark assigned patients as attended via a checkbox. Once attended, the patient appears in the attended list.
 - **Undo Attend**: Doctors can "Undo" attended status, relisting the patient as only assigned (and removing from attended list in real time).
-- **Real-Time Refresh**: Attended patient lists update in real time across browser tabs and after actions such as report save or attend/undo.
-- **Persistence**: Patient details on the main page persist across navigation and reloads using localStorage.
 
 ### 🔬 AI & Processing
 - **Segmentation**: ResUNet50-based model for brain image segmentation.
 - **Default Model Path**: Backend uses the default `resunet50_brain_segmentation.pth`. Frontend model-path UI has been removed.
 - **Report Generation**: Uses Ollama (example model: `llama3.2`).
+- **AI-Powered Medical Report Comparison**: Compare old and new medical reports using the same LLaMA 3.2 model via Ollama API. The comparison provides:
+  - Analytical, structured, and professional comparison output with clinical focus
+  - Key clinical findings, diagnosis changes, treatment recommendations, and critical differences
+  - Sectioned output with UPPERCASE headers and bullet points (no markdown)
+  - Brief summary and analytics (word counts, added/removed words, and keywords)
+  - Visual diff and statistics (frontend renders a clean, analytical view)
+  - Print-friendly and exportable analysis
 
 ## System Architecture
 

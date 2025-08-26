@@ -1,6 +1,6 @@
 "use client"
 
-import type React from "react"
+import React from "react"
 
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Loader2, Upload, Brain, Activity, AlertCircle, CheckCircle, LogOut, User, UserCheck, FileText, Download, Edit, Save, FileDown, FileUp } from "lucide-react"
+import { FileDiff, Loader2, AlertCircle, Printer, Upload, Brain, Activity, CheckCircle, LogOut, User, UserCheck, FileText, Download, Edit, Save, FileDown, FileUp } from "lucide-react"
 import Image from "next/image"
 import { useAuth } from "@/components/AuthContext"
 import { useRouter } from "next/navigation"
@@ -54,6 +54,176 @@ interface AIReport {
   isEdited: boolean
   originalContent: string
 }
+
+// --- Report Comparison Section Component ---
+function ReportComparisonSection({ currentPatient, aiReport }: { currentPatient: any, aiReport: any }) {
+  const [comparison, setComparison] = React.useState<string | null>(null);
+  const [isLoading, setIsLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const compareReports = async () => {
+    if (!aiReport?.content) return;
+    
+    setIsLoading(true);
+    setError(null);
+    setComparison(null);
+    
+    try {
+      // Prepare the old report from patient information
+      const oldReport = [
+        `Medical History: ${currentPatient?.medicalHistory || 'Not provided'}`,
+        `Previous Conditions: ${currentPatient?.previousConditions || 'Not provided'}`,
+        `Current Medications: ${currentPatient?.currentMedications || 'Not provided'}`,
+        `Family History: ${currentPatient?.familyHistory || 'Not provided'}`,
+        `Known Allergies: ${currentPatient?.knownAllergies || 'None reported'}`,
+        `Chief Complaint: ${currentPatient?.chiefComplaint || 'Not provided'}`,
+        `Neurological Symptoms: ${currentPatient?.neurologicalSymptoms || 'Not reported'}`,
+        `Provisional Diagnosis: ${currentPatient?.provisionalDiagnosis || 'Not provided'}`
+      ].join('\n\n');
+      
+      const response = await fetch("/api/compare-reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          oldReport, 
+          newReport: aiReport.content,
+          context: {
+            patient_name: currentPatient?.name || 'Unknown Patient',
+            comparison_date: new Date().toISOString()
+          }
+        })
+      });
+      
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.message || 'Failed to compare reports');
+      }
+      
+      const result = await response.json();
+      setComparison(result.comparison || 'No comparison available');
+    } catch (err: any) {
+      console.error('Comparison error:', err);
+      setError(err.message || 'An error occurred during comparison');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Format the comparison with proper styling for sections
+  const formatComparison = (text: string) => {
+    if (!text) return null;
+    
+    const sections = text.split(/\n(?=\[[A-Z ]+\])/);
+    
+    return sections.map((section, i) => {
+      const [header, ...content] = section.split('\n').filter(Boolean);
+      const isHeader = header?.match(/^\[[A-Z ]+\]$/);
+      
+      return (
+        <div key={i} className="mb-6">
+          {isHeader ? (
+            <h4 className="font-bold text-lg text-primary mb-2 border-b pb-1">
+              {header.replace(/[\[\]]/g, '')}
+            </h4>
+          ) : (
+            <p className="whitespace-pre-wrap">{header}</p>
+          )}
+          <div className="pl-4 space-y-1">
+            {content.map((line, j) => (
+              <p key={j} className="text-foreground/90">
+                {line.startsWith('•') ? (
+                  <span className="flex items-start gap-2">
+                    <span className="text-primary mt-1">•</span>
+                    <span>{line.substring(1).trim()}</span>
+                  </span>
+                ) : (
+                  line
+                )}
+              </p>
+            ))}
+          </div>
+        </div>
+      );
+    });
+  };
+
+  return (
+    <Card className="mt-8">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <FileDiff className="h-5 w-5" />
+          Medical Report Comparison Analysis
+        </CardTitle>
+        <CardDescription className="text-muted-foreground">
+          Detailed analytical comparison between patient records and AI-generated report
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col sm:flex-row gap-4 mb-6">
+          <Button
+            onClick={compareReports}
+            disabled={isLoading || !aiReport?.content}
+            className="w-full sm:w-auto"
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Analyzing...
+              </>
+            ) : (
+              <>
+                <FileDiff className="mr-2 h-4 w-4" />
+                Analyze Report Changes
+              </>
+            )}
+          </Button>
+          
+          {comparison && (
+            <Button variant="outline" onClick={() => window.print()} className="w-full sm:w-auto">
+              <Printer className="mr-2 h-4 w-4" />
+              Print Analysis
+            </Button>
+          )}
+        </div>
+
+        {error && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Analysis Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {comparison && (
+          <div className="bg-card border rounded-lg p-6 shadow-sm">
+            <div className="space-y-6">
+              <div className="flex justify-between items-center border-b pb-2 mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold">Medical Report Comparison</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Generated: {new Date().toLocaleString()}
+                  </p>
+                </div>
+                <Badge variant="outline" className="text-xs">
+                  AI Analysis
+                </Badge>
+              </div>
+              
+              <div className="space-y-6">
+                {formatComparison(comparison)}
+              </div>
+              
+              <div className="pt-4 mt-4 border-t text-sm text-muted-foreground">
+                <p>This analysis was generated using advanced AI and should be reviewed by a qualified healthcare professional.</p>
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 
 export default function RadiologistAssistance() {
   const { user, loading, logout } = useAuth()
@@ -1522,6 +1692,13 @@ Format the report professionally for medical documentation.`,
                   </Tabs>
                 </CardContent>
               </Card>
+            )}
+            {/* Report Comparison Section: Only show after AI report is generated */}
+            {aiReport && (
+              <ReportComparisonSection
+                currentPatient={currentPatient}
+                aiReport={aiReport}
+              />
             )}
           </div>
         </div>
