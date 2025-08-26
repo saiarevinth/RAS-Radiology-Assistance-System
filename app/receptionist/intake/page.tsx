@@ -25,6 +25,7 @@ interface IntakeForm {
   knownAllergy: string
   chiefComplaint: string
   referringDoctor: string
+  assignedDoctorId: string // NEW FIELD
   neurologicalSymptom: string
   treatmentHistory: string
   symptomProgression: string
@@ -40,6 +41,16 @@ interface ExtractionStatus {
 }
 
 export default function ReceptionistIntakePage() {
+  const AUTHORIZED_DOCTORS = [
+    { id: 1, email: 'dr.smith@hospital.com', full_name: 'Dr. John Smith', specialty: 'Radiology', department: 'Radiology Department' },
+    { id: 2, email: 'dr.johnson@hospital.com', full_name: 'Dr. Sarah Johnson', specialty: 'Neurology', department: 'Neurology Department' },
+    { id: 3, email: 'dr.williams@hospital.com', full_name: 'Dr. Michael Williams', specialty: 'Oncology', department: 'Oncology Department' },
+    { id: 4, email: 'dr.brown@hospital.com', full_name: 'Dr. Emily Brown', specialty: 'Cardiology', department: 'Cardiology Department' },
+    { id: 5, email: 'dr.davis@hospital.com', full_name: 'Dr. Robert Davis', specialty: 'Emergency Medicine', department: 'Emergency Department' },
+    { id: 6, email: 'dr.wilson@hospital.com', full_name: 'Dr. Lisa Wilson', specialty: 'Pediatrics', department: 'Pediatrics Department' },
+    { id: 7, email: 'dr.martinez@hospital.com', full_name: 'Dr. Carlos Martinez', specialty: 'Orthopedics', department: 'Orthopedics Department' },
+  ];
+  const doctorList = AUTHORIZED_DOCTORS;
   const { user, loading, logout } = useAuth()
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
@@ -69,6 +80,7 @@ export default function ReceptionistIntakePage() {
     knownAllergy: "",
     chiefComplaint: "",
     referringDoctor: "",
+    assignedDoctorId: "",
     neurologicalSymptom: "",
     treatmentHistory: "",
     symptomProgression: "",
@@ -102,7 +114,7 @@ export default function ReceptionistIntakePage() {
     return null
   }
 
-  const handleChange = (field: keyof IntakeForm, value: string) => {
+  const handleChange = (field: keyof IntakeForm, value: string | number) => {
     setForm((prev) => ({ ...prev, [field]: value }))
   }
 
@@ -586,7 +598,26 @@ export default function ReceptionistIntakePage() {
       symptomProgression: "",
       reportContent: "",
     }
-    setForm(clearedForm)
+    setForm({
+      patientName: "",
+      age: "",
+      sex: "",
+      dob: "",
+      contactNumber: "",
+      patientId: "",
+      abhaId: "",
+      previousCondition: "",
+      currentMedication: "",
+      familyHistory: "",
+      knownAllergy: "",
+      chiefComplaint: "",
+      referringDoctor: "",
+      assignedDoctorId: "",
+      neurologicalSymptom: "",
+      treatmentHistory: "",
+      symptomProgression: "",
+      reportContent: ""
+    })
     setSelectedReport(null)
     setManualText("")
     setExtractionStatus({
@@ -605,36 +636,91 @@ export default function ReceptionistIntakePage() {
     setIsSaving(true)
     try {
       // Validate required fields
-      const requiredFields = ['patientName', 'age', 'contactNumber']
+      const requiredFields = ['patientName', 'age', 'contactNumber', 'patientId']
       const missingFields = requiredFields.filter(field => !form[field as keyof IntakeForm]?.trim())
-      
       if (missingFields.length > 0) {
         throw new Error(`Please fill in required fields: ${missingFields.join(', ')}`)
       }
-      
+
       let pdfFilePath = null
-      
-      // Upload PDF if selected
       if (selectedReport && selectedReport.type === 'application/pdf') {
         const formData = new FormData()
         formData.append('file', selectedReport)
-        
         const uploadResponse = await fetch(`${BACKEND_URL}/upload-pdf`, {
           method: 'POST',
           body: formData,
           credentials: 'include',
         })
-        
         if (!uploadResponse.ok) {
           const errorData = await uploadResponse.json()
           throw new Error(errorData.error || 'Failed to upload PDF')
         }
-        
         const uploadResult = await uploadResponse.json()
         pdfFilePath = uploadResult.file_path
       }
-      
-      // Prepare data for API
+
+      // Step 1: Check if patient exists
+      let patientExists = false
+      let patientId = form.patientId.trim()
+      try {
+        const searchResp = await fetch(`${BACKEND_URL}/api/patients/search?patient_id=${encodeURIComponent(patientId)}`, {
+          method: 'GET',
+          credentials: 'include',
+        })
+        if (searchResp.ok) {
+          const data = await searchResp.json()
+          if (data.success && data.patient) {
+            patientExists = true
+          }
+        }
+      } catch (err) {
+        // Ignore, will try to create
+      }
+
+      // Step 2: If not exists, create patient
+      if (!patientExists) {
+        // Split patientName into first and last name (best effort)
+        const [firstName, ...rest] = form.patientName.trim().split(' ')
+        const lastName = rest.join(' ') || 'Unknown'
+        const dob = form.dob && form.dob !== 'Date of birth not found' ? form.dob : null
+        const gender = form.sex && form.sex !== 'Gender not specified' ? form.sex : null
+        if (!firstName || !dob || !gender) {
+          throw new Error('To create a new patient, please provide patient name, date of birth, and gender.')
+        }
+        const createPayload = {
+          patient_id: patientId,
+          first_name: firstName,
+          last_name: lastName,
+          date_of_birth: dob,
+          gender: gender,
+          phone: form.contactNumber,
+          email: '',
+          address: '',
+          blood_group: '',
+          known_allergies: form.knownAllergy,
+          medical_history: form.previousCondition,
+          current_medications: form.currentMedication,
+          family_history: form.familyHistory,
+        }
+        const createResp = await fetch(`${BACKEND_URL}/api/patients`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(createPayload),
+        })
+        if (!createResp.ok) {
+          const errData = await createResp.json()
+          throw new Error(errData.error || 'Failed to create patient')
+        }
+      }
+
+      // Step 3: Proceed with intake submission
+      const assignedDoctorIdNum = Number(form.assignedDoctorId);
+      if (!assignedDoctorIdNum || isNaN(assignedDoctorIdNum)) {
+        setError('Please select a valid doctor to assign.');
+        setIsSaving(false);
+        return;
+      }
       const intakeData = {
         patientName: form.patientName,
         age: form.age,
@@ -649,6 +735,7 @@ export default function ReceptionistIntakePage() {
         knownAllergy: form.knownAllergy,
         chiefComplaint: form.chiefComplaint,
         referringDoctor: form.referringDoctor,
+        assignedDoctorId: assignedDoctorIdNum,
         neurologicalSymptom: form.neurologicalSymptom,
         treatmentHistory: form.treatmentHistory,
         symptomProgression: form.symptomProgression,
@@ -658,9 +745,7 @@ export default function ReceptionistIntakePage() {
           extractedFields: extractionStatus.extractedFields,
           timestamp: new Date().toISOString()
         } : null
-      }
-      
-      // Save to database
+      };
       const response = await fetch(`${BACKEND_URL}/api/intake`, {
         method: 'POST',
         headers: {
@@ -669,24 +754,18 @@ export default function ReceptionistIntakePage() {
         credentials: 'include',
         body: JSON.stringify(intakeData)
       })
-      
       if (!response.ok) {
         const errorData = await response.json()
         throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`)
       }
-      
       const result = await response.json()
-      console.log("Patient intake saved successfully:", result)
-      
+      console.log('Patient intake saved successfully:', result)
       setSaveSuccess(true)
       setTimeout(() => setSaveSuccess(false), 3000)
-      
-      // Clear form after successful save
       clearExtractedData()
-      
     } catch (err: any) {
-      console.error("Save error:", err)
-      setError(err?.message || "Failed to save patient intake")
+      console.error('Save error:', err)
+      setError(err?.message || 'Failed to save patient intake')
     } finally {
       setIsSaving(false)
     }
@@ -1133,6 +1212,29 @@ export default function ReceptionistIntakePage() {
                   <p className="text-xs text-green-600 flex items-center gap-1">
                     <CheckCircle className="h-3 w-3" />
                     Filled
+                  </p>
+                )}
+              </div>
+
+              {/* Assigned Doctor Dropdown */}
+              <div className="space-y-2">
+                <Label htmlFor="assignedDoctorId">Assign to Doctor</Label>
+                <select
+                  id="assignedDoctorId"
+                  value={form.assignedDoctorId}
+                  onChange={(e) => handleChange("assignedDoctorId", e.target.value)}
+                  className={getFieldStatus(form.assignedDoctorId) === "filled" ? "border-green-500 bg-green-50" : "border-gray-300"}
+                  required
+                >
+                  <option value="">Select Doctor</option>
+                  {doctorList.map((doc: any) => (
+                    <option key={doc.id} value={doc.id}>{doc.full_name} ({doc.email})</option>
+                  ))}
+                </select>
+                {getFieldStatus(form.assignedDoctorId) === "filled" && (
+                  <p className="text-xs text-green-600 flex items-center gap-1">
+                    <CheckCircle className="h-3 w-3" />
+                    Assigned
                   </p>
                 )}
               </div>

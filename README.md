@@ -18,6 +18,11 @@ A comprehensive medical imaging platform that combines AI-powered image segmenta
 - **AI Report Generation**: Create AI-assisted narrative reports (via Ollama) and edit before saving.
 - **Report Update**: Save AI/edited report content to the latest patient report when available.
 - **Export**: Download reports as PDF, DOCX, or HTML.
+- **Assigned & Attended Patients List**: View assigned and attended patients in the doctor profile page. Assigned patients are those allocated by reception; attended patients are those for whom the doctor has performed extraction/segmentation or manually marked as attended.
+- **Mark as Attended**: Doctors can mark assigned patients as attended via a checkbox. Once attended, the patient appears in the attended list.
+- **Undo Attend**: Doctors can "Undo" attended status, relisting the patient as only assigned (and removing from attended list in real time).
+- **Real-Time Refresh**: Attended patient lists update in real time across browser tabs and after actions such as report save or attend/undo.
+- **Persistence**: Patient details on the main page persist across navigation and reloads using localStorage.
 
 ### 🔬 AI & Processing
 - **Segmentation**: ResUNet50-based model for brain image segmentation.
@@ -158,6 +163,18 @@ Tip: When an intake is saved, the PDF filename returned by `/upload-pdf` should 
 - `GET /uploads/<filename>` — Serve uploaded files
 - `POST /segment` — Segment uploaded image (Doctor). Uses default model `resunet50_brain_segmentation.pth`.
 - `POST /extract-pdf` — Extract fields from uploaded PDF (for intake assistance)
+
+### Backend Endpoints (Doctor Attended/Assigned Logic)
+- `GET /api/doctor/<doctor_id>/assigned-patients` — List patients assigned to the doctor
+- `GET /api/doctor/<doctor_id>/attended-patients` — List patients attended by the doctor (via segmentation, report save, or manual mark)
+- `POST /api/doctor/<doctor_id>/attend-patient` — Mark an assigned patient as attended (checkbox or after extraction)
+- `POST /api/doctor/<doctor_id>/undo-attend-patient` — Undo attended status (relist as assigned)
+
+### Real-Time UI and Data Sync
+- Attended/assigned lists automatically refresh after any action (attend/undo/report save) and across browser tabs using a storage event mechanism.
+
+### Persistence
+- Patient details on the main page are persisted using localStorage and automatically rehydrated on reload or navigation.
 
 ### Endpoint Examples
 

@@ -41,6 +41,78 @@ from database import database_bp  # noqa: E402
 app.register_blueprint(auth_bp)
 app.register_blueprint(database_bp)
 
+# --- Patient Intake API (add assignedDoctorId support) ---
+from models import db, Patient, PatientIntake, User, MedicalReport
+
+
+# --- Doctor profile patient lists ---
+@app.route('/api/doctor/<int:doctor_id>/assigned-patients', methods=['GET'])
+def get_assigned_patients(doctor_id):
+    intakes = PatientIntake.query.filter_by(assigned_doctor_id=doctor_id).all()
+    patient_ids = list({intake.patient_id for intake in intakes})
+    patients = Patient.query.filter(Patient.id.in_(patient_ids)).all() if patient_ids else []
+    return jsonify({'assigned_patients': [p.to_dict() for p in patients]})
+
+@app.route('/api/doctor/<int:doctor_id>/attended-patients', methods=['GET'])
+def get_attended_patients(doctor_id):
+    # Get all patients attended by this doctor via MedicalReport
+    report_patient_ids = set(report.patient_id for report in MedicalReport.query.filter_by(doctor_id=doctor_id).all())
+    # Get all patients manually marked as attended (new logic)
+    manual_attended = PatientIntake.query.filter_by(assigned_doctor_id=doctor_id).filter(PatientIntake.report_content == 'attended').all()
+    manual_patient_ids = set(intake.patient_id for intake in manual_attended)
+    all_patient_ids = list(report_patient_ids.union(manual_patient_ids))
+    patients = Patient.query.filter(Patient.id.in_(all_patient_ids)).all() if all_patient_ids else []
+    return jsonify({'attended_patients': [p.to_dict() for p in patients]})
+
+@app.route('/api/doctor/<int:doctor_id>/attend-patient', methods=['POST'])
+def attend_patient(doctor_id):
+    """Mark an assigned patient as attended by this doctor (manual or via extraction)"""
+    user = require_auth(request)
+    if not user or user.role != 'doctor' or user.id != doctor_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.get_json()
+    patient_id = data.get('patient_id')
+    if not patient_id:
+        return jsonify({'error': 'Missing patient_id'}), 400
+    try:
+        # Find the latest intake for this patient assigned to this doctor
+        intake = PatientIntake.query.filter_by(patient_id=patient_id, assigned_doctor_id=doctor_id).order_by(PatientIntake.created_at.desc()).first()
+        if not intake:
+            return jsonify({'error': 'No such assigned patient'}), 404
+        # Mark as attended (use report_content field as a flag)
+        intake.report_content = 'attended'
+        intake.updated_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'Patient marked as attended'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Failed to mark as attended: {str(e)}'}), 500
+
+@app.route('/api/doctor/<int:doctor_id>/undo-attend-patient', methods=['POST'])
+def undo_attend_patient(doctor_id):
+    """Undo attending a patient, relisting as assigned only."""
+    user = require_auth(request)
+    if not user or user.role != 'doctor' or user.id != doctor_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.get_json()
+    patient_id = data.get('patient_id')
+    if not patient_id:
+        return jsonify({'error': 'Missing patient_id'}), 400
+    try:
+        intake = PatientIntake.query.filter_by(patient_id=patient_id, assigned_doctor_id=doctor_id).order_by(PatientIntake.created_at.desc()).first()
+        if not intake:
+            return jsonify({'error': 'No such assigned patient'}), 404
+        # Undo attended: clear the attended flag if it was set
+        if intake.report_content == 'attended':
+            intake.report_content = None
+            intake.updated_at = datetime.utcnow()
+            db.session.commit()
+        return jsonify({'success': True, 'message': 'Patient relisted as assigned'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Failed to undo attend: {str(e)}'}), 500
+
+
 # Simple model cache so you don't reload on every request
 _model_cache = {}
 
@@ -278,6 +350,8 @@ def export_report():
             return jsonify({"error": "Unsupported format"}), 400
             
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": f"Failed to export report: {str(e)}"}), 500
 
 def generate_pdf_report(report_data):
@@ -291,21 +365,131 @@ def generate_pdf_report(report_data):
         status=200,
         mimetype='text/html'
     )
-    response.headers['Content-Disposition'] = f'attachment; filename="{report_data.get("patientName", "patient")}_report.pdf"'
+    filename = generate_safe_filename(report_data.get('patientName', 'patient'), 'pdf')
+    response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
 
 def generate_docx_report(report_data):
-    """Generate DOCX report (simplified - returns HTML for now)"""
-    # For now, return HTML that can be converted to DOCX
-    # In production, you'd use a library like python-docx
-    html_content = generate_html_content(report_data)
-    
+    """Generate DOCX report using python-docx; fallback to HTML-as-DOC if unavailable"""
+    # Try importing python-docx. If it fails, fallback immediately.
+    try:
+        from docx import Document
+        from docx.shared import Pt
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        html_content = generate_html_content(report_data)
+        response = app.response_class(
+            response=html_content,
+            status=200,
+            mimetype='application/msword'
+        )
+        filename = generate_safe_filename(report_data.get('patientName', 'patient'), 'doc')
+        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+    import re
+
+    # Build the document
+    doc = Document()
+
+    def add_heading(doc, text, level=1):
+        p = doc.add_paragraph()
+        run = p.add_run(text)
+        run.bold = True
+        run.font.size = Pt(16 if level == 1 else 14)
+        return p
+
+    def add_kv(paragraph_text):
+        p = doc.add_paragraph()
+        if ":" in paragraph_text:
+            key, value = paragraph_text.split(":", 1)
+            run_b = p.add_run(f"{key}:")
+            run_b.bold = True
+            p.add_run(value)
+        else:
+            p.add_run(paragraph_text)
+
+    def add_rich_paragraph(text: str):
+        # Handle bullets like lines starting with '* '
+        lines = (text or '').split('\n')
+        for line in lines:
+            if re.match(r"^\s*\*\s+", line):
+                p = doc.add_paragraph(style='List Bullet')
+                content = re.sub(r"^\s*\*\s+", "", line)
+            else:
+                p = doc.add_paragraph()
+                content = line
+            # Convert **bold** segments into bold runs
+            parts = re.split(r"(\*\*.+?\*\*)", content)
+            for part in parts:
+                if not part:
+                    continue
+                m = re.match(r"^\*\*(.+)\*\*$", part)
+                if m:
+                    run = p.add_run(m.group(1))
+                    run.bold = True
+                else:
+                    p.add_run(part)
+
+    # Header
+    title = doc.add_paragraph()
+    tr = title.add_run("Medical Imaging Report")
+    tr.bold = True
+    tr.font.size = Pt(20)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    doc.add_paragraph(f"Generated on {datetime.now().strftime('%B %d, %Y at %I:%M %p')}")
+
+    # Patient Information
+    add_heading(doc, "Patient Information", level=1)
+    add_kv(f"Patient Name: {report_data.get('patientName', 'N/A')}")
+    add_kv(f"Referring Physician: {report_data.get('patientInfo', {}).get('referringPhysician', 'N/A')}")
+    add_kv(f"Report Generated By: {report_data.get('doctorName', 'N/A')} ({report_data.get('doctorSpecialty', 'N/A')})")
+    add_kv(f"Chief Complaint: {report_data.get('patientInfo', {}).get('chiefComplaint', 'N/A')}")
+    add_kv(f"Affected Area: {report_data.get('affectedPercentage', 'N/A')}%")
+    add_kv(f"Report Status: {'Edited' if report_data.get('isEdited') else 'AI Generated'}")
+
+    # Clinical History
+    add_heading(doc, "Clinical History", level=1)
+    add_kv(f"Medical History: {report_data.get('patientInfo', {}).get('medicalHistory', 'N/A')}")
+    add_kv(f"Current Medications: {report_data.get('patientInfo', {}).get('currentMedications', 'N/A')}")
+    add_kv(f"Known Allergies: {report_data.get('patientInfo', {}).get('knownAllergies', 'N/A')}")
+    add_kv(f"Family History: {report_data.get('patientInfo', {}).get('familyHistory', 'N/A')}")
+
+    # AI Analysis Report
+    add_heading(doc, "AI Analysis Report", level=1)
+    content = report_data.get('content', 'No report content available') or ''
+    # Split into paragraphs and structure bullets
+    for para in re.split(r"\n\s*\n", content.strip()):
+        lines = para.strip().split('\n')
+        for line in lines:
+            if line.strip().startswith('* '):
+                doc.add_paragraph(line.strip()[2:], style='List Bullet')
+            elif line.strip().startswith('**') and line.strip().endswith('**'):
+                # Heading-like bold
+                p = doc.add_paragraph()
+                run = p.add_run(line.strip().strip('*'))
+                run.bold = True
+            else:
+                doc.add_paragraph(line.strip())
+
+    # Footer
+    doc.add_paragraph()
+    doc.add_paragraph("This report was generated using AI-assisted medical imaging analysis.")
+    doc.add_paragraph("Please review all findings with qualified medical professionals.")
+
+    # Stream as response
+    mem = io.BytesIO()
+    doc.save(mem)
+    mem.seek(0)
     response = app.response_class(
-        response=html_content,
+        response=mem.getvalue(),
         status=200,
-        mimetype='text/html'
+        mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     )
-    response.headers['Content-Disposition'] = f'attachment; filename="{report_data.get("patientName", "patient")}_report.docx"'
+    filename = generate_safe_filename(report_data.get('patientName', 'patient'), 'docx')
+    response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
 
 def generate_html_content(report_data):
@@ -381,8 +565,14 @@ def generate_html_report(report_data):
         status=200,
         mimetype='text/html'
     )
-    response.headers['Content-Disposition'] = f'attachment; filename="{report_data.get("patientName", "patient")}_report.html"'
+    filename = generate_safe_filename(report_data.get('patientName', 'patient'), 'html')
+    response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
+
+def generate_safe_filename(name, ext):
+    import re
+    safe = re.sub(r'[^A-Za-z0-9._-]', '_', str(name or 'patient'))
+    return f"{safe}_report.{ext}"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

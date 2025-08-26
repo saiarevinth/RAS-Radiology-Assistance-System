@@ -87,7 +87,8 @@ def create_patient_intake():
             report_content=data.get('reportContent'),
             previous_report_pdf=data.get('previousReportPdf'),
             extracted_data=data.get('extractedData'),
-            created_by=user.id
+            created_by=user.id,
+            assigned_doctor_id=data.get('assignedDoctorId')
         )
         
         db.session.add(intake)

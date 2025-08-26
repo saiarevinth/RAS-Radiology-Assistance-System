@@ -24,6 +24,7 @@ def _get_serializer() -> URLSafeTimedSerializer:
 
 @dataclass
 class Doctor:
+    id: int
     email: str
     full_name: str
     specialty: str
@@ -44,6 +45,7 @@ class Receptionist:
 # Predefined list of authorized doctors with secure password hashes
 AUTHORIZED_DOCTORS = [
     Doctor(
+        id=1,
         email="dr.smith@hospital.com",
         full_name="Dr. John Smith",
         specialty="Radiology",
@@ -51,6 +53,7 @@ AUTHORIZED_DOCTORS = [
         password_hash=generate_password_hash("123")
     ),
     Doctor(
+        id=2,
         email="dr.johnson@hospital.com",
         full_name="Dr. Sarah Johnson", 
         specialty="Neurology",
@@ -58,6 +61,7 @@ AUTHORIZED_DOCTORS = [
         password_hash=generate_password_hash("Johnson2024!")
     ),
     Doctor(
+        id=3,
         email="dr.williams@hospital.com",
         full_name="Dr. Michael Williams",
         specialty="Oncology", 
@@ -65,6 +69,7 @@ AUTHORIZED_DOCTORS = [
         password_hash=generate_password_hash("Williams2024!")
     ),
     Doctor(
+        id=4,
         email="dr.brown@hospital.com",
         full_name="Dr. Emily Brown",
         specialty="Cardiology",
@@ -72,6 +77,7 @@ AUTHORIZED_DOCTORS = [
         password_hash=generate_password_hash("Brown2024!")
     ),
     Doctor(
+        id=5,
         email="dr.davis@hospital.com",
         full_name="Dr. Robert Davis",
         specialty="Emergency Medicine",
@@ -79,6 +85,7 @@ AUTHORIZED_DOCTORS = [
         password_hash=generate_password_hash("Davis2024!")
     ),
     Doctor(
+        id=6,
         email="dr.wilson@hospital.com",
         full_name="Dr. Lisa Wilson",
         specialty="Pediatrics",
@@ -86,6 +93,7 @@ AUTHORIZED_DOCTORS = [
         password_hash=generate_password_hash("Wilson2024!")
     ),
     Doctor(
+        id=7,
         email="dr.martinez@hospital.com",
         full_name="Dr. Carlos Martinez",
         specialty="Orthopedics",
@@ -193,6 +201,7 @@ def login():
         jsonify({
             "ok": True,
             "user": {
+                "id": doctor.id,
                 "email": doctor.email,
                 "full_name": doctor.full_name,
                 "specialty": doctor.specialty,
@@ -279,6 +288,7 @@ def me():
     if email in ACTIVE_DOCTORS:
         doctor = ACTIVE_DOCTORS[email]
         user_payload = {
+            "id": doctor.id,
             "email": doctor.email,
             "full_name": doctor.full_name,
             "specialty": doctor.specialty,
@@ -348,7 +358,7 @@ def require_auth(request_obj) -> Optional[Union[Doctor, Receptionist]]:
         if hasattr(user_obj, 'email'):
             email = user_obj.email.lower()
             if email in ACTIVE_DOCTORS:
-                return UserWrapper(user_obj, "doctor", 1)
+                return UserWrapper(user_obj, "doctor", ACTIVE_DOCTORS[email].id)
             elif email in ACTIVE_RECEPTIONISTS:
                 return UserWrapper(user_obj, "receptionist", 2)
     

@@ -118,19 +118,23 @@ class PatientIntake(db.Model):
     previous_report_pdf = db.Column(db.String(500), nullable=True)  # Path to uploaded PDF
     extracted_data = db.Column(db.JSON, nullable=True)  # Store extracted PDF data
     
+    # Assignment
+    assigned_doctor_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    
     # Session Information
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    created_by_user = db.relationship('User', backref='created_intakes')
+    created_by_user = db.relationship('User', backref='created_intakes', foreign_keys=[created_by])
     
     def to_dict(self):
         return {
             'id': self.id,
             'patient_id': self.patient_id,
             'age': self.age,
+            'assigned_doctor_id': self.assigned_doctor_id,
             'sex': self.sex,
             'dob': self.dob.isoformat() if self.dob else None,
             'contact_number': self.contact_number,

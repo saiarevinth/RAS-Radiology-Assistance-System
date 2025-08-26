@@ -64,22 +64,43 @@ export default function RadiologistAssistance() {
   const [error, setError] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [showPatientForm, setShowPatientForm] = useState(false)
+
+  // Clear patient data from localStorage on logout
+  useEffect(() => {
+    if (!user) {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("ras_patient_info")
+        localStorage.removeItem("ras_patient_name")
+        localStorage.removeItem("ras_current_patient")
+      }
+    }
+  }, [user])
   
   // Patient Information State
-  const [patientInfo, setPatientInfo] = useState<PatientInfo>({
-    medicalHistory: "",
-    previousConditions: "",
-    currentMedications: "",
-    familyHistory: "",
-    knownAllergies: "",
-    chiefComplaint: "",
-    referringPhysician: "",
-    neurologicalSymptoms: "",
-    provisionalDiagnosis: "",
-    treatmentHistory: "",
-    onsetOfSymptoms: "",
-    symptomProgression: "",
-    additionalNotes: ""
+  const [patientInfo, setPatientInfo] = useState<PatientInfo>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("ras_patient_info")
+      if (saved) {
+        try {
+          return JSON.parse(saved) as PatientInfo
+        } catch {}
+      }
+    }
+    return {
+      medicalHistory: "",
+      previousConditions: "",
+      currentMedications: "",
+      familyHistory: "",
+      knownAllergies: "",
+      chiefComplaint: "",
+      referringPhysician: "",
+      neurologicalSymptoms: "",
+      provisionalDiagnosis: "",
+      treatmentHistory: "",
+      onsetOfSymptoms: "",
+      symptomProgression: "",
+      additionalNotes: ""
+    }
   })
 
   // AI Report State
@@ -88,20 +109,55 @@ export default function RadiologistAssistance() {
   const [isEditingReport, setIsEditingReport] = useState(false)
   const [editedReportContent, setEditedReportContent] = useState("")
   const [isExporting, setIsExporting] = useState(false)
-  const [patientName, setPatientName] = useState("")
+  const [patientName, setPatientName] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("ras_patient_name") || ""
+    }
+    return ""
+  })
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [isSavingReport, setIsSavingReport] = useState(false)
   const [saveReportError, setSaveReportError] = useState<string | null>(null)
+  const [activeReportTab, setActiveReportTab] = useState<'view' | 'edit'>('view')
 
   // Patient Search State
   const [patientSearchId, setPatientSearchId] = useState("")
   const [isSearchingPatient, setIsSearchingPatient] = useState(false)
-  const [currentPatient, setCurrentPatient] = useState<any>(null)
+  const [currentPatient, setCurrentPatient] = useState<any>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("ras_current_patient")
+      if (saved) {
+        try {
+          return JSON.parse(saved)
+        } catch {}
+      }
+    }
+    return null
+  })
   const [patientSearchError, setPatientSearchError] = useState<string | null>(null)
 
   // Backend URL - can be configured via environment variable
   const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000"
   const OLLAMA_URL = process.env.NEXT_PUBLIC_OLLAMA_URL || "http://localhost:11434"
+
+  // Helper: format AI report content by converting **bold** to <strong> and preserving newlines
+  const formatReportHtml = (text: string) => {
+    const escapeHtml = (s: string) =>
+      (s || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+    const escaped = escapeHtml(text)
+    const withBold = escaped.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    return withBold.replace(/\n/g, "<br/>")
+  }
+
+  // Helper: sanitize content for jsPDF (remove markdown markers, prettify bullets)
+  const sanitizeReportTextForPDF = (text: string) => {
+    return (text || "")
+      .replace(/\*\*(.+?)\*\*/g, "$1") // remove bold markers
+      .replace(/^\s*\*\s+/gm, "• ") // convert bullets
+  }
 
   // Redirect to appropriate page based on role
   useEffect(() => {
@@ -113,6 +169,25 @@ export default function RadiologistAssistance() {
       }
     }
   }, [loading, user, router])
+
+  // Persist patient info to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("ras_patient_info", JSON.stringify(patientInfo))
+    }
+  }, [patientInfo])
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("ras_patient_name", patientName)
+    }
+  }, [patientName])
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("ras_current_patient", JSON.stringify(currentPatient))
+    }
+  }, [currentPatient])
 
   // Show loading while checking authentication
   if (loading) {
@@ -159,7 +234,9 @@ export default function RadiologistAssistance() {
 
       const result = await response.json()
       setCurrentPatient(result.patient)
-      
+      if (typeof window !== "undefined") {
+        localStorage.setItem("ras_current_patient", JSON.stringify(result.patient))
+      }
       // Auto-populate patient information if available
       if (result.patient.intake) {
         const intake = result.patient.intake
@@ -178,6 +255,22 @@ export default function RadiologistAssistance() {
           symptomProgression: intake.symptom_progression || "",
           additionalNotes: intake.report_content || ""
         }))
+        if (typeof window !== "undefined") {
+          localStorage.setItem("ras_patient_name", result.patient.full_name)
+          localStorage.setItem("ras_patient_info", JSON.stringify({
+            medicalHistory: intake.previous_condition || "",
+            previousConditions: intake.previous_condition || "",
+            currentMedications: intake.current_medication || "",
+            familyHistory: intake.family_history || "",
+            knownAllergies: intake.known_allergy || "",
+            chiefComplaint: intake.chief_complaint || "",
+            referringPhysician: intake.referring_doctor || "",
+            neurologicalSymptoms: intake.neurological_symptom || "",
+            treatmentHistory: intake.treatment_history || "",
+            symptomProgression: intake.symptom_progression || "",
+            additionalNotes: intake.report_content || ""
+          }))
+        }
       }
 
       console.log("Patient found:", result.patient)
@@ -203,10 +296,13 @@ export default function RadiologistAssistance() {
   }
 
   const handlePatientInfoChange = (field: keyof PatientInfo, value: string) => {
-    setPatientInfo(prev => ({
-      ...prev,
-      [field]: value
-    }))
+    setPatientInfo(prev => {
+      const updated = { ...prev, [field]: value }
+      if (typeof window !== "undefined") {
+        localStorage.setItem("ras_patient_info", JSON.stringify(updated))
+      }
+      return updated
+    })
   }
 
   const generateAIReport = async () => {
@@ -302,6 +398,7 @@ Format the report professionally for medical documentation.`,
   const startEditingReport = () => {
     setIsEditingReport(true)
     setEditedReportContent(aiReport?.content || "")
+    setActiveReportTab('edit')
   }
 
   const saveEditedReport = () => {
@@ -322,6 +419,7 @@ Format the report professionally for medical documentation.`,
     }
     setIsEditingReport(false)
     console.log("Save completed, switching to view mode")
+    setActiveReportTab('view')
   }
 
   const cancelEditing = () => {
@@ -339,7 +437,7 @@ Format the report professionally for medical documentation.`,
         doctorName: user.full_name,
         doctorSpecialty: user.specialty,
         timestamp: aiReport.timestamp,
-        content: aiReport.content,
+        content: isEditingReport ? editedReportContent : aiReport.content,
         patientInfo: patientInfo,
         affectedPercentage: result?.affected_percentage,
         isEdited: aiReport.isEdited
@@ -455,8 +553,8 @@ Format the report professionally for medical documentation.`,
       yPosition = addWrappedText('AI Analysis Report', yPosition, 14, true)
       yPosition += 5
       
-      // Split the AI report content into paragraphs for better formatting
-      const reportContent = reportData.content || 'No report content available'
+      // Split the AI report content into paragraphs for better formatting (plain text for jsPDF)
+      const reportContent = sanitizeReportTextForPDF(reportData.content || 'No report content available')
       const paragraphs = reportContent.split('\n\n').filter((p: string) => p.trim())
       
       paragraphs.forEach((paragraph: string) => {
@@ -584,7 +682,7 @@ Format the report professionally for medical documentation.`,
         
         <div class="section">
           <h2>AI Analysis Report</h2>
-          <div class="report-content">${reportData.content}</div>
+          <div class="report-content">${formatReportHtml(reportData.content)}</div>
         </div>
         
         <div class="footer">
@@ -698,6 +796,11 @@ Format the report professionally for medical documentation.`,
         }
       } catch {}
 
+      // Trigger attended patients refresh event for doctor profile page
+      if (typeof window !== "undefined") {
+        localStorage.setItem("ras_attended_patients_refresh", Date.now().toString())
+      }
+
       setSaveSuccess(true)
       setTimeout(() => setSaveSuccess(false), 3000)
     } catch (e: any) {
@@ -720,7 +823,7 @@ Format the report professionally for medical documentation.`,
             <div className="flex flex-col items-end text-sm text-gray-600">
               <div className="flex items-center gap-2">
                 <User className="h-4 w-4" />
-                <span className="font-medium">{user.full_name}</span>
+                <span className="font-medium cursor-pointer text-blue-700 hover:underline" onClick={() => router.push(`/doctor/profile?email=${encodeURIComponent(user.email)}`)}>{user.full_name}</span>
               </div>
               <div className="text-xs text-gray-500">
                 {user.specialty} • {user.department}
@@ -1283,7 +1386,7 @@ Format the report professionally for medical documentation.`,
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <Tabs defaultValue="view" className="w-full">
+                  <Tabs value={activeReportTab} onValueChange={(v) => setActiveReportTab(v as 'view' | 'edit')} className="w-full">
                     <TabsList className="grid w-full grid-cols-2">
                       <TabsTrigger value="view">View Report</TabsTrigger>
                       <TabsTrigger value="edit">Edit Report</TabsTrigger>
@@ -1291,7 +1394,10 @@ Format the report professionally for medical documentation.`,
                     
                     <TabsContent value="view" className="space-y-4">
                       <div className="bg-white border rounded-lg p-4 max-h-96 overflow-y-auto">
-                        <pre className="whitespace-pre-wrap text-sm font-mono">{aiReport.content}</pre>
+                        <div
+                          className="whitespace-pre-wrap text-sm font-mono"
+                          dangerouslySetInnerHTML={{ __html: formatReportHtml(aiReport.content) }}
+                        />
                       </div>
                       
                       <div className="flex gap-2">
@@ -1404,19 +1510,6 @@ Format the report professionally for medical documentation.`,
                           size="sm"
                         >
                           Cancel
-                        </Button>
-                        <Button onClick={saveReportToDB} size="sm" disabled={isSavingReport || !currentPatient} className="ml-auto">
-                          {isSavingReport ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Saving...
-                            </>
-                          ) : (
-                            <>
-                              <Save className="mr-2 h-4 w-4" />
-                              Save to DB
-                            </>
-                          )}
                         </Button>
                       </div>
                       {saveReportError && (
