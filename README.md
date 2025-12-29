@@ -260,4 +260,14 @@ NEXT_PUBLIC_OLLAMA_URL=http://localhost:11434
 
 ---
 
+## Contributors:
+## Shree Charan Kannan - Machine Learning model Design, Data Preprocessing, Evaluation & Experimentation
+## Sai Arevinth Raaj - Frontend, Backend Development and Database Connection
+## Yaazhini - Data Preprocessing & Gen AI Fine Tuning
+## Vishnu A - Frontend Development & UI
+
+## ML Work Developed Externally
+– Model training notebooks and experiments were developed by Shree Charan
+– Integrated into backend via exported model files / APIs
+
 Note: This system is for educational and research purposes. Always follow medical protocols and consult qualified professionals for patient care.
