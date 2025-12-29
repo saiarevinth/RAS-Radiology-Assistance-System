@@ -251,23 +251,21 @@ NEXT_PUBLIC_OLLAMA_URL=http://localhost:11434
 3. Update frontend components
 4. Re-run `db.create_all()` (dev) if schema changed
 
-## Security
+## Contributors
 
-- Role-based access control and session cookies
-- Input validation and sanitization
-- Secure file upload handling
-- CORS for development
+* **Shree Charan Kannan** – Machine Learning model design, data preprocessing, evaluation, and experimentation
+* **Sai Arevinth Raaj** – Frontend development, backend development, and database integration
+* **Yaazhini** – Data preprocessing and Generative AI fine-tuning
+* **Vishnu A** – Frontend development and UI design
+
+## Machine Learning Development
+
+* Machine learning model training, notebooks, and experiments were developed externally by **Shree Charan Kannan**
+* Trained models were exported and integrated into the backend using model files and/or APIs
+
+## Disclaimer
+
+* This system is intended **only for educational and research purposes**
+* Always follow standard medical protocols and consult **qualified medical professionals** for patient diagnosis and care
 
 ---
-
-## Contributors:
-Shree Charan Kannan - Machine Learning model Design, Data Preprocessing, Evaluation & Experimentation
-Sai Arevinth Raaj - Frontend, Backend Development and Database Connection
-Yaazhini - Data Preprocessing & Gen AI Fine Tuning
-Vishnu A - Frontend Development & UI
-
-## ML Work Developed Externally
-– Model training notebooks and experiments were developed by Shree Charan
-– Integrated into backend via exported model files / APIs
-
-Note: This system is for educational and research purposes. Always follow medical protocols and consult qualified professionals for patient care.
