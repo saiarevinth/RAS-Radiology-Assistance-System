@@ -598,6 +598,4 @@ def generate_safe_filename(name, ext):
     return f"{safe}_report.{ext}"
 
 if __name__ == "__main__":
-    from llama_warmup import warmup_llama_model
-    warmup_llama_model()
     app.run(host="0.0.0.0", port=5000, debug=True)
